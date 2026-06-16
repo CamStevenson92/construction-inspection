@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "inspection-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["web_app.py"],
+      "port": 5000,
+      "autoPort": true
+    }
+  ]
+}

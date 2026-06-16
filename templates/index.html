@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Site Inspection Processor</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<header id="appHeader">
+  <div class="header-inner">
+    <div class="brand">
+      <span class="brand-icon">🏗</span>
+      <span class="brand-name">Site Inspection Processor</span>
+    </div>
+    <nav class="steps-nav">
+      <button class="step-btn active" data-view="upload" onclick="stepClick('upload')">
+        <span class="step-num">1</span><span class="step-label">Upload</span>
+      </button>
+      <span class="step-sep">›</span>
+      <button class="step-btn" data-view="annotate" onclick="stepClick('annotate')" id="stepAnnotate" disabled>
+        <span class="step-num">2</span><span class="step-label">Annotate</span>
+      </button>
+      <span class="step-sep">›</span>
+      <button class="step-btn" data-view="report" onclick="stepClick('report')" disabled>
+        <span class="step-num">3</span><span class="step-label">Report</span>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- ===================== UPLOAD VIEW ===================== -->
+  <section id="view-upload" class="view active">
+    <div class="page-inner">
+      <h2>Upload Inspection Photos</h2>
+      <p class="subtitle">Select photos from your device. GPS coordinates, timestamps, camera direction and weather will be extracted automatically.</p>
+
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-icon">📸</div>
+        <p class="drop-title">Drag &amp; drop photos here</p>
+        <p class="drop-sub">or</p>
+        <label class="btn btn-primary" for="fileInput">Choose Photos</label>
+        <input type="file" id="fileInput" multiple accept="image/*,.heic,.heif" style="display:none">
+        <p class="drop-formats">JPEG · PNG · HEIC · TIFF · WebP &nbsp;|&nbsp; iPhone · Android · Samsung</p>
+      </div>
+
+      <div id="uploadProgress" class="progress-card hidden">
+        <div class="progress-header">
+          <span id="progressLabel">Processing photos…</span>
+          <span id="progressCount" class="muted">0 / 0</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+        </div>
+        <div id="progressErrors" class="error-list hidden"></div>
+      </div>
+
+      <div id="fileList" class="file-list hidden"></div>
+
+      <div id="uploadFooter" class="upload-footer hidden">
+        <div class="stats-row" id="statsRow"></div>
+        <button class="btn btn-primary btn-lg" onclick="stepClick('annotate')">
+          Annotate Photos &nbsp;›
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== ANNOTATE VIEW ===================== -->
+  <section id="view-annotate" class="view">
+
+    <!-- TEXT MODE -->
+    <div id="text-annotate" class="hidden">
+      <div class="annotate-layout">
+        <aside class="thumb-strip" id="thumbStrip"></aside>
+
+        <div class="photo-col">
+          <div class="photo-nav-bar">
+            <button class="btn btn-icon" id="btnPrev" onclick="navigate(-1)">&#8249;</button>
+            <span id="photoCounter" class="photo-counter">— / —</span>
+            <button class="btn btn-icon" id="btnNext" onclick="navigate(1)">&#8250;</button>
+          </div>
+          <div class="photo-frame" id="photoFrame">
+            <img id="photoImg" src="" alt="inspection photo" draggable="false">
+            <div class="dup-banner hidden" id="dupBanner"></div>
+          </div>
+        </div>
+
+        <aside class="info-col">
+          <div class="meta-card">
+            <h3 class="card-title">📋 Metadata</h3>
+            <table class="meta-table">
+              <tr><th>Date / Time</th><td id="mDatetime">—</td></tr>
+              <tr><th>Coordinates</th><td id="mCoords">—</td></tr>
+              <tr><th>Direction</th><td id="mDirection">—</td></tr>
+              <tr><th>Altitude</th><td id="mAltitude">—</td></tr>
+              <tr><th>Camera</th><td id="mCamera">—</td></tr>
+              <tr><th>Weather</th><td id="mWeather">—</td></tr>
+            </table>
+          </div>
+
+          <div class="notes-card">
+            <h3 class="card-title">📝 Inspection Notes</h3>
+            <p class="notes-hint">Tip: tap a text field then use the microphone key on your keyboard to dictate.</p>
+            <label class="notes-label" for="txtInspected">What was inspected</label>
+            <textarea id="txtInspected" class="notes-area" rows="3"
+              placeholder="Describe what you inspected in this photo…"
+              oninput="scheduleNoteSave()"></textarea>
+            <label class="notes-label issues" for="txtIssues">Issues found</label>
+            <textarea id="txtIssues" class="notes-area" rows="3"
+              placeholder="Defects, non-conformances, safety concerns…"
+              oninput="scheduleNoteSave()"></textarea>
+            <label class="notes-label actions" for="txtActions">Actions required by contractor</label>
+            <textarea id="txtActions" class="notes-area" rows="3"
+              placeholder="Remediation, rectification, follow-up items…"
+              oninput="scheduleNoteSave()"></textarea>
+            <div class="notes-saved" id="notesSaved"></div>
+          </div>
+
+          <div class="annotate-footer">
+            <button class="btn btn-outline" onclick="switchMode()" style="margin-bottom:8px;width:100%">
+              🎤 Switch to Voice Mode
+            </button>
+            <button class="btn btn-primary btn-block" onclick="goToView('report')">
+              Generate Report &nbsp;›
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- VOICE MODE -->
+    <div id="voice-annotate" class="hidden">
+      <div class="voice-wrap">
+        <!-- Photo area -->
+        <div class="voice-photo-area" id="voicePhotoArea">
+          <img id="voiceImg" src="" alt="" draggable="false">
+
+          <!-- Top overlay: counter + metadata -->
+          <div class="voice-top-bar">
+            <span id="vmCounter" class="vm-counter">1 / 1</span>
+            <span id="vmDatetime" class="vm-meta"></span>
+            <span id="vmCoords" class="vm-meta"></span>
+            <span id="vmWeather" class="vm-meta"></span>
+          </div>
+
+          <!-- Duplicate / similar banner -->
+          <div class="voice-dup-banner hidden" id="voiceDupBanner"></div>
+
+          <!-- Live transcript overlay (shown while recording) -->
+          <div class="voice-live-text hidden" id="voiceLiveText">
+            <p id="voiceTranscript"></p>
+          </div>
+        </div>
+
+        <!-- Three-button bar fixed at base -->
+        <div class="voice-controls-bar" id="voiceControlsBar">
+          <button class="vcb-btn vcb-nav" id="btnVoicePrev" onclick="voiceNavigate(-1)">
+            <span class="vcb-icon">◀</span>
+            <span class="vcb-label">Prev</span>
+          </button>
+
+          <button class="vcb-btn vcb-record" id="btnRecord">
+            <div class="record-ring" id="recordRing">
+              <span class="record-mic" id="recordMic">🎤</span>
+            </div>
+            <span class="vcb-label" id="recordLabel">Hold to Record</span>
+          </button>
+
+          <button class="vcb-btn vcb-nav" id="btnVoiceNext" onclick="voiceNavigate(1)">
+            <span class="vcb-icon">▶</span>
+            <span class="vcb-label">Next</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ===================== REPORT VIEW ===================== -->
+  <section id="view-report" class="view">
+    <div class="page-inner">
+      <h2>Generate Inspection Report</h2>
+      <p class="subtitle">Fill in the project details, optionally upload your Word template, then click Generate. A ZIP with the report and all photos will download automatically.</p>
+
+      <div class="report-form-col">
+        <div class="card">
+          <h3 class="card-title">Project Details</h3>
+          <div class="form-group"><label>Site / Project Name</label>
+            <input type="text" id="fSiteName" placeholder="e.g. Riverside Commercial Centre — Stage 2"></div>
+          <div class="form-group"><label>Project Number</label>
+            <input type="text" id="fProjectNum" placeholder="e.g. P2024-0142"></div>
+          <div class="form-group"><label>Inspector Name</label>
+            <input type="text" id="fInspector" placeholder="Full name"></div>
+          <div class="form-group"><label>Site Address</label>
+            <input type="text" id="fAddress" placeholder="Street address"></div>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">Word Template <span class="optional">(optional)</span></h3>
+          <p class="card-desc">Upload a .docx template with <code>&lt;&lt;PLACEHOLDER&gt;&gt;</code> tokens. Photos are appended after template content.</p>
+          <label class="file-pick-label" id="templatePickLabel" for="templateInput">📄 Choose Template (.docx)</label>
+          <input type="file" id="templateInput" accept=".docx" style="display:none" onchange="onTemplateSelected(this)">
+          <details class="placeholder-ref">
+            <summary>View available placeholders</summary>
+            <pre>&lt;&lt;SITE_NAME&gt;&gt;        Site / project name
+&lt;&lt;PROJECT_NUMBER&gt;&gt;   Project reference
+&lt;&lt;INSPECTOR_NAME&gt;&gt;   Inspector full name
+&lt;&lt;SITE_ADDRESS&gt;&gt;     Street address
+&lt;&lt;INSPECTION_DATE&gt;&gt;  Date of earliest photo
+&lt;&lt;REPORT_DATE&gt;&gt;      Today's date
+&lt;&lt;TOTAL_PHOTOS&gt;&gt;     Number of photos</pre>
+          </details>
+        </div>
+
+        <div id="reportSummary" class="card report-summary"></div>
+
+        <button class="btn btn-primary btn-lg btn-block" id="btnGenerate" onclick="generateReport()">
+          ✅ &nbsp;Generate Report
+        </button>
+
+        <div id="reportProgress" class="progress-card hidden">
+          <div class="progress-header"><span>Building report…</span></div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill indeterminate" id="reportFill"></div>
+          </div>
+        </div>
+
+        <div id="reportResult" class="report-result hidden"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===================== MODE SELECTION MODAL ===================== -->
+<div class="modal-overlay hidden" id="modeModal">
+  <div class="modal-card">
+    <h2 class="modal-title">How would you like to annotate?</h2>
+    <p class="modal-sub">Choose your input method. You can switch at any time.</p>
+    <div class="mode-options">
+      <button class="mode-btn" onclick="selectMode('voice')">
+        <span class="mode-icon">🎤</span>
+        <span class="mode-title">Voice Narration</span>
+        <span class="mode-desc">Hold to record — AI automatically fills the three inspection fields from your narration</span>
+      </button>
+      <button class="mode-btn" onclick="selectMode('text')">
+        <span class="mode-icon">⌨️</span>
+        <span class="mode-title">Text / Keyboard</span>
+        <span class="mode-desc">Type directly into each field, or use your device's built-in dictation key</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== VOICE REVIEW SHEET ===================== -->
+<div class="review-sheet hidden" id="reviewSheet">
+  <div class="review-handle"></div>
+  <div class="review-header">
+    <h3 class="review-title">Review &amp; Confirm</h3>
+    <button class="review-close" onclick="dismissReview()" aria-label="Close">✕</button>
+  </div>
+  <div id="reviewAiNote" class="review-ai-note"></div>
+
+  <div class="review-body">
+    <div class="review-field">
+      <label class="review-label">What was inspected</label>
+      <textarea id="rvInspected" class="review-textarea" rows="3"></textarea>
+    </div>
+    <div class="review-field">
+      <label class="review-label issues">Issues found</label>
+      <textarea id="rvIssues" class="review-textarea" rows="3"></textarea>
+    </div>
+    <div class="review-field">
+      <label class="review-label actions">Actions required by contractor</label>
+      <textarea id="rvActions" class="review-textarea" rows="3"></textarea>
+    </div>
+  </div>
+
+  <div class="review-actions">
+    <button class="btn btn-primary" onclick="confirmNotes(true)">Confirm &amp; Next ▶</button>
+    <button class="btn btn-outline" onclick="confirmNotes(false)">Confirm &amp; Stay</button>
+    <button class="btn btn-ghost" onclick="dismissReview()">Discard</button>
+  </div>
+</div>
+
+<div class="review-backdrop hidden" id="reviewBackdrop" onclick="dismissReview()"></div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

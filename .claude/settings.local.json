@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\templates\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\static\\\\css\")",
+      "Bash(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\static\\\\js\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\templates\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\static\\\\css\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\camer\\\\Photo processing\\\\static\\\\js\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(python web_app.py)",
+      "Bash(curl -s http://localhost:5000/)",
+      "Bash(gh auth *)",
+      "Bash(git --version)",
+      "Bash(git config *)"
+    ]
+  }
+}
