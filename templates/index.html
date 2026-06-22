@@ -13,8 +13,12 @@
 <header id="appHeader">
   <div class="header-inner">
     <div class="brand">
-      <span class="brand-icon">🏗</span>
-      <span class="brand-name">Site Inspection Processor</span>
+      <div class="meinhardt-logo">
+        <div class="logo-wordmark">
+          M<span class="logo-ei">EI</span>NHARDT
+        </div>
+        <div class="logo-tagline">Transforming Cities, Shaping the Future</div>
+      </div>
     </div>
     <nav class="steps-nav">
       <button class="step-btn active" data-view="upload" onclick="stepClick('upload')">
@@ -156,6 +160,8 @@
           <div class="voice-live-text hidden" id="voiceLiveText">
             <p id="voiceTranscript"></p>
           </div>
+
+          <div class="swipe-hint" id="swipeHint">← Swipe to navigate →</div>
         </div>
 
         <!-- Three-button bar fixed at base -->
@@ -169,7 +175,7 @@
             <div class="record-ring" id="recordRing">
               <span class="record-mic" id="recordMic">🎤</span>
             </div>
-            <span class="vcb-label" id="recordLabel">Hold to Record</span>
+            <span class="vcb-label" id="recordLabel">Tap to Record</span>
           </button>
 
           <button class="vcb-btn vcb-nav" id="btnVoiceNext" onclick="voiceNavigate(1)">

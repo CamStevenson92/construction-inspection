@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -140,25 +141,58 @@ threading.Thread(target=_cleanup_loop, daemon=True).start()
 # ---------------------------------------------------------------------------
 
 def _process_photos(state: SessionState, filepaths: List[Path]):
+    """
+    Parallel photo processing:
+    - EXIF + phash extracted concurrently across all photos
+    - Weather fetched in parallel, cached by (location, hour) so same-site
+      inspections make only ONE weather API call regardless of photo count
+    """
     state.processing = True
     photos: List[PhotoData] = []
+    photos_lock = threading.Lock()
+    weather_cache: dict = {}
+    weather_lock = threading.Lock()
 
-    for fp in filepaths:
+    def _exif_one(fp: Path):
         try:
             photo = extract_photo_data(str(fp))
             photo.phash = compute_phash(str(fp))
-            if photo.has_gps:
-                photo.weather = fetch_weather(
-                    photo.latitude, photo.longitude, photo.datetime_taken
-                )
-            photos.append(photo)
+            with photos_lock:
+                photos.append(photo)
         except Exception as e:
             log.exception("Error processing %s", fp.name)
             with state._lock:
                 state.errors.append(f"{fp.name}: {e}")
+        finally:
+            with state._lock:
+                state.processed += 1
 
-        with state._lock:
-            state.processed += 1
+    # Phase 1 — parallel EXIF + phash (CPU/IO bound, 8 workers)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(_exif_one, filepaths))
+
+    # Sort by datetime so photos appear in capture order
+    photos.sort(key=lambda p: p.datetime_taken or datetime(1970, 1, 1))
+
+    def _weather_one(photo: PhotoData):
+        if not photo.has_gps:
+            return
+        # Cache key: location rounded to ~1 km + hour bucket
+        hour = photo.datetime_taken.strftime("%Y-%m-%d-%H") if photo.datetime_taken else "now"
+        key = (round(photo.latitude, 2), round(photo.longitude, 2), hour)
+        with weather_lock:
+            if key in weather_cache:
+                photo.weather = weather_cache[key]
+                return
+        # Fetch outside the lock so requests run in parallel
+        result = fetch_weather(photo.latitude, photo.longitude, photo.datetime_taken)
+        with weather_lock:
+            weather_cache[key] = result
+        photo.weather = result
+
+    # Phase 2 — parallel weather (network bound, 6 workers; cache prevents duplicate calls)
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        list(ex.map(_weather_one, photos))
 
     detect_duplicates(photos)
 
@@ -166,7 +200,8 @@ def _process_photos(state: SessionState, filepaths: List[Path]):
         state.photos = photos
         state.processing = False
 
-    log.info("Session %s: processed %d photos", state.session_id, len(photos))
+    log.info("Session %s: processed %d photos (%d unique weather calls)",
+             state.session_id, len(photos), len(weather_cache))
 
 
 # ---------------------------------------------------------------------------

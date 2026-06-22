@@ -1,5 +1,5 @@
 /* ============================================================
-   Site Inspection Processor — Frontend JS
+   Meinhardt ANZ — Site Inspection Processor
    ============================================================ */
 
 'use strict';
@@ -11,13 +11,18 @@ let sessionId    = null;
 let photos       = [];
 let currentIdx   = -1;
 let saveTimer    = null;
-let annotateMode = null;   // 'voice' | 'text' | null
+let annotateMode = null;   // 'voice' | 'text'
 let aiAvailable  = false;
 
-// Voice recording state
+// Voice state
 let recognition  = null;
 let isRecording  = false;
 let liveText     = '';
+
+// Swipe state
+let swipeTouchStartX = 0;
+let swipeTouchStartY = 0;
+let swipeActive      = false;
 
 // ---------------------------------------------------------------------------
 // Init
@@ -29,7 +34,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     e.target.value = '';
   });
 
-  // Start server session
   try {
     const res = await api('POST', '/api/session');
     sessionId = res.session_id;
@@ -37,22 +41,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Cannot reach server — is web_app.py running?');
   }
 
-  // Check AI availability
   try {
     const cfg = await api('GET', '/api/config');
     aiAvailable = cfg.ai_available;
   } catch { /* offline */ }
 
-  // Press-and-hold record button
   setupRecordButton();
+  setupSwipe();
 });
 
 // ---------------------------------------------------------------------------
 // View navigation
 // ---------------------------------------------------------------------------
 function stepClick(name) {
-  if (name === 'annotate' && photos.length) {
-    if (!annotateMode) { showModeModal(); return; }
+  if (name === 'annotate' && photos.length && !annotateMode) {
+    showModeModal(); return;
   }
   goToView(name);
 }
@@ -60,22 +63,17 @@ function stepClick(name) {
 function goToView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById('view-' + name).classList.add('active');
-  document.querySelectorAll('.step-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.view === name);
-  });
+  document.querySelectorAll('.step-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === name));
 
   if (name === 'annotate') {
-    if (annotateMode === 'voice') {
-      document.getElementById('voice-annotate').classList.remove('hidden');
-      document.getElementById('text-annotate').classList.add('hidden');
-      if (photos.length && currentIdx === -1) voiceNavigate(0, true);
-    } else {
-      document.getElementById('text-annotate').classList.remove('hidden');
-      document.getElementById('voice-annotate').classList.add('hidden');
-      if (photos.length && currentIdx === -1) showPhoto(0);
+    const isVoice = annotateMode === 'voice';
+    document.getElementById('voice-annotate').classList.toggle('hidden', !isVoice);
+    document.getElementById('text-annotate').classList.toggle('hidden', isVoice);
+    if (photos.length && currentIdx === -1) {
+      isVoice ? voiceShowPhoto(0) : showPhoto(0);
     }
   }
-
   if (name === 'report') updateReportSummary();
 }
 
@@ -94,16 +92,11 @@ function selectMode(mode) {
 
 function switchMode() {
   annotateMode = annotateMode === 'voice' ? 'text' : 'voice';
-  // sync index
-  if (annotateMode === 'voice') {
-    document.getElementById('voice-annotate').classList.remove('hidden');
-    document.getElementById('text-annotate').classList.add('hidden');
-    voiceShowPhoto(currentIdx);
-  } else {
-    document.getElementById('text-annotate').classList.remove('hidden');
-    document.getElementById('voice-annotate').classList.add('hidden');
-    showPhoto(currentIdx);
-  }
+  const isVoice = annotateMode === 'voice';
+  document.getElementById('voice-annotate').classList.toggle('hidden', !isVoice);
+  document.getElementById('text-annotate').classList.toggle('hidden', isVoice);
+  if (isVoice) voiceShowPhoto(currentIdx);
+  else showPhoto(currentIdx);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +116,7 @@ function setupDropZone() {
 }
 
 // ---------------------------------------------------------------------------
-// File upload + processing
+// Upload + processing
 // ---------------------------------------------------------------------------
 async function handleFiles(files) {
   if (!sessionId) { showToast('No server session — refresh the page.'); return; }
@@ -135,7 +128,7 @@ async function handleFiles(files) {
   document.getElementById('fileList').classList.add('hidden');
   document.getElementById('uploadFooter').classList.add('hidden');
 
-  const progressCard = document.getElementById('uploadProgress');
+  const progressCard  = document.getElementById('uploadProgress');
   progressCard.classList.remove('hidden');
   document.getElementById('progressLabel').textContent = 'Uploading…';
   document.getElementById('progressCount').textContent = `0 / ${imgs.length}`;
@@ -147,37 +140,35 @@ async function handleFiles(files) {
     await api('POST', `/api/upload/${sessionId}`, fd);
   } catch (err) {
     showToast('Upload failed: ' + err.message);
-    progressCard.classList.add('hidden');
-    return;
+    progressCard.classList.add('hidden'); return;
   }
 
   document.getElementById('progressLabel').textContent = 'Extracting metadata & fetching weather…';
 
   const poll = setInterval(async () => {
     try {
-      const status = await api('GET', `/api/status/${sessionId}`);
-      const pct = status.total ? Math.round(status.processed / status.total * 100) : 0;
+      const st = await api('GET', `/api/status/${sessionId}`);
+      const pct = st.total ? Math.round(st.processed / st.total * 100) : 0;
       document.getElementById('progressFill').style.width = pct + '%';
-      document.getElementById('progressCount').textContent = `${status.processed} / ${status.total}`;
-      if (!status.processing) { clearInterval(poll); progressCard.classList.add('hidden'); await loadPhotos(); }
+      document.getElementById('progressCount').textContent = `${st.processed} / ${st.total}`;
+      if (!st.processing) { clearInterval(poll); progressCard.classList.add('hidden'); await loadPhotos(); }
     } catch { /* retry */ }
-  }, 1200);
+  }, 800);
 }
 
 async function loadPhotos() {
   photos = await api('GET', `/api/photos/${sessionId}`);
 
   const list = document.getElementById('fileList');
-  list.innerHTML = '';
-  list.classList.remove('hidden');
+  list.innerHTML = ''; list.classList.remove('hidden');
   photos.forEach((p, i) => {
     const item = document.createElement('div');
     item.className = 'file-item' + (p.is_duplicate ? ' is-dup' : p.similar_to ? ' is-sim' : '');
     const badges = [];
-    if (p.has_gps)      badges.push('<span class="badge badge-gps">📍 GPS</span>');
+    if (p.has_gps)       badges.push('<span class="badge badge-gps">📍 GPS</span>');
     if (p.has_direction) badges.push('<span class="badge badge-dir">🧭 Dir</span>');
-    if (p.weather)      badges.push('<span class="badge badge-wx">🌤 Wx</span>');
-    if (p.is_duplicate) badges.push('<span class="badge badge-dup">⚠ DUPLICATE</span>');
+    if (p.weather)       badges.push('<span class="badge badge-wx">🌤 Wx</span>');
+    if (p.is_duplicate)  badges.push('<span class="badge badge-dup">⚠ DUPLICATE</span>');
     else if (p.similar_to) badges.push(`<span class="badge badge-sim">≈ Similar to ${esc(p.similar_to)}</span>`);
     item.innerHTML = `
       <img class="file-thumb" src="/api/photo/${sessionId}/${i}/thumb" alt="">
@@ -202,7 +193,7 @@ async function loadPhotos() {
 }
 
 // ---------------------------------------------------------------------------
-// TEXT MODE — thumbnail strip + photo viewer
+// TEXT MODE
 // ---------------------------------------------------------------------------
 function buildThumbStrip() {
   const strip = document.getElementById('thumbStrip');
@@ -224,7 +215,14 @@ async function showPhoto(idx) {
   currentIdx = idx;
   const p = photos[idx];
 
-  document.getElementById('photoImg').src = `/api/photo/${sessionId}/${idx}/image`;
+  // Smooth fade transition
+  const img = document.getElementById('photoImg');
+  img.classList.add('fading');
+  setTimeout(() => {
+    img.src = `/api/photo/${sessionId}/${idx}/image`;
+    img.onload = () => img.classList.remove('fading');
+  }, 180);
+
   document.getElementById('photoCounter').textContent = `${idx + 1} / ${photos.length}`;
   document.getElementById('btnPrev').disabled = idx === 0;
   document.getElementById('btnNext').disabled = idx === photos.length - 1;
@@ -243,10 +241,8 @@ async function showPhoto(idx) {
     banner.textContent = `⚠  DUPLICATE — very similar to "${p.similar_to}"`;
   } else if (p.similar_to) {
     banner.classList.add('is-sim'); banner.classList.remove('hidden');
-    banner.textContent = `≈  SIMILAR to "${p.similar_to}" — review carefully`;
-  } else {
-    banner.classList.add('hidden');
-  }
+    banner.textContent = `≈  SIMILAR to "${p.similar_to}"`;
+  } else { banner.classList.add('hidden'); }
 
   const ta1 = document.getElementById('txtInspected');
   const ta2 = document.getElementById('txtIssues');
@@ -258,11 +254,10 @@ async function showPhoto(idx) {
   ta1._loading = ta2._loading = ta3._loading = false;
   document.getElementById('notesSaved').textContent = '';
 
-  document.querySelectorAll('.thumb-item').forEach(el => {
-    el.classList.toggle('active', parseInt(el.dataset.idx) === idx);
-  });
-  const activeThumb = document.querySelector(`.thumb-item[data-idx="${idx}"]`);
-  if (activeThumb) activeThumb.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  document.querySelectorAll('.thumb-item').forEach(el =>
+    el.classList.toggle('active', parseInt(el.dataset.idx) === idx));
+  document.querySelector(`.thumb-item[data-idx="${idx}"]`)
+    ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
 }
 
 function navigate(delta) {
@@ -270,7 +265,7 @@ function navigate(delta) {
   if (next >= 0 && next < photos.length) showPhoto(next);
 }
 
-// Keyboard arrows (text mode)
+// Keyboard (text mode)
 document.addEventListener('keydown', e => {
   if (!document.getElementById('view-annotate').classList.contains('active')) return;
   if (document.activeElement.tagName === 'TEXTAREA') return;
@@ -278,21 +273,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight') navigate(1);
 });
 
-// Touch swipe (text mode photo frame)
-(function () {
-  let x0 = null;
-  document.addEventListener('touchstart', e => {
-    const frame = document.getElementById('photoFrame');
-    if (frame && frame.contains(e.target)) x0 = e.touches[0].clientX;
-  }, { passive: true });
-  document.addEventListener('touchend', e => {
-    if (x0 === null) return;
-    const dx = e.changedTouches[0].clientX - x0; x0 = null;
-    if (Math.abs(dx) > 50 && annotateMode === 'text') navigate(dx < 0 ? 1 : -1);
-  }, { passive: true });
-})();
-
-// Notes auto-save
 function scheduleNoteSave() {
   if (document.getElementById('txtInspected')._loading) return;
   document.getElementById('notesSaved').textContent = '';
@@ -318,28 +298,37 @@ async function flushNotes() {
 }
 
 // ---------------------------------------------------------------------------
-// VOICE MODE — show photo
+// VOICE MODE — photo display
 // ---------------------------------------------------------------------------
-function voiceNavigate(delta, absolute = false) {
-  const next = absolute ? delta : currentIdx + delta;
+function voiceNavigate(delta) {
+  const next = currentIdx + delta;
   if (next < 0 || next >= photos.length) return;
-  currentIdx = next;
-  voiceShowPhoto(next);
+  voiceShowPhoto(next, delta);
 }
 
-function voiceShowPhoto(idx) {
+function voiceShowPhoto(idx, direction = 0) {
   if (!photos.length || idx < 0 || idx >= photos.length) return;
   currentIdx = idx;
-  const p = photos[idx];
+  const p    = photos[idx];
+  const img  = document.getElementById('voiceImg');
 
-  document.getElementById('voiceImg').src = `/api/photo/${sessionId}/${idx}/image`;
-  document.getElementById('vmCounter').textContent = `${idx + 1} / ${photos.length}`;
+  // Swipe-out current, swap src, swipe-in
+  if (direction !== 0) {
+    img.classList.add(direction > 0 ? 'swipe-left' : 'swipe-right');
+    setTimeout(() => {
+      img.src = `/api/photo/${sessionId}/${idx}/image`;
+      img.classList.remove('swipe-left', 'swipe-right');
+    }, 180);
+  } else {
+    img.src = `/api/photo/${sessionId}/${idx}/image`;
+  }
+
+  document.getElementById('vmCounter').textContent  = `${idx + 1} / ${photos.length}`;
   document.getElementById('vmDatetime').textContent = p.datetime || '';
-  document.getElementById('vmCoords').textContent   = p.coords  || '';
-  document.getElementById('vmWeather').textContent  = p.weather || '';
-
-  document.getElementById('btnVoicePrev').disabled = idx === 0;
-  document.getElementById('btnVoiceNext').disabled = idx === photos.length - 1;
+  document.getElementById('vmCoords').textContent   = p.coords   || '';
+  document.getElementById('vmWeather').textContent  = p.weather  || '';
+  document.getElementById('btnVoicePrev').disabled  = idx === 0;
+  document.getElementById('btnVoiceNext').disabled  = idx === photos.length - 1;
 
   const dup = document.getElementById('voiceDupBanner');
   dup.className = 'voice-dup-banner';
@@ -349,34 +338,76 @@ function voiceShowPhoto(idx) {
   } else if (p.similar_to) {
     dup.classList.add('is-sim'); dup.classList.remove('hidden');
     dup.textContent = `≈  SIMILAR to "${p.similar_to}"`;
-  } else {
-    dup.classList.add('hidden');
-  }
+  } else { dup.classList.add('hidden'); }
 
-  // Clear live transcript
   document.getElementById('voiceTranscript').textContent = '';
   document.getElementById('voiceLiveText').classList.add('hidden');
 }
 
 // ---------------------------------------------------------------------------
-// VOICE RECORDING — press-and-hold
+// SWIPE — works on both voice photo area and text mode photo frame
+// ---------------------------------------------------------------------------
+function setupSwipe() {
+  // Voice photo area
+  const voiceArea = document.getElementById('voicePhotoArea');
+  if (voiceArea) {
+    voiceArea.addEventListener('touchstart', e => {
+      swipeTouchStartX = e.touches[0].clientX;
+      swipeTouchStartY = e.touches[0].clientY;
+      swipeActive = true;
+    }, { passive: true });
+
+    voiceArea.addEventListener('touchend', e => {
+      if (!swipeActive) return;
+      swipeActive = false;
+      const dx = e.changedTouches[0].clientX - swipeTouchStartX;
+      const dy = e.changedTouches[0].clientY - swipeTouchStartY;
+      // Only horizontal swipes, ignore vertical scroll
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 44) {
+        if (!isRecording) voiceNavigate(dx < 0 ? 1 : -1);
+      }
+    }, { passive: true });
+
+    voiceArea.addEventListener('touchcancel', () => { swipeActive = false; }, { passive: true });
+  }
+
+  // Text mode photo frame — also swipeable
+  const textFrame = document.getElementById('photoFrame');
+  if (textFrame) {
+    let tx0 = 0, ty0 = 0, tactive = false;
+    textFrame.addEventListener('touchstart', e => {
+      tx0 = e.touches[0].clientX; ty0 = e.touches[0].clientY; tactive = true;
+    }, { passive: true });
+    textFrame.addEventListener('touchend', e => {
+      if (!tactive) return; tactive = false;
+      const dx = e.changedTouches[0].clientX - tx0;
+      const dy = e.changedTouches[0].clientY - ty0;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 44) navigate(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    textFrame.addEventListener('touchcancel', () => { tactive = false; }, { passive: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VOICE RECORDING — toggle on single tap/click
 // ---------------------------------------------------------------------------
 function setupRecordButton() {
   const btn = document.getElementById('btnRecord');
   if (!btn) return;
 
-  // Touch (mobile)
-  btn.addEventListener('touchstart', e => {
-    e.preventDefault();
-    startRecording();
-  }, { passive: false });
-  btn.addEventListener('touchend',    e => { e.preventDefault(); stopRecording(); }, { passive: false });
-  btn.addEventListener('touchcancel', e => { e.preventDefault(); stopRecording(); }, { passive: false });
+  // Single tap / click toggles recording
+  btn.addEventListener('click', toggleRecording);
 
-  // Mouse (desktop testing)
-  btn.addEventListener('mousedown', startRecording);
-  btn.addEventListener('mouseup',   stopRecording);
-  btn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
+  // Prevent double-fire on mobile (touchend fires click)
+  btn.addEventListener('touchend', e => {
+    e.preventDefault();   // stops the subsequent click event
+    toggleRecording();
+  }, { passive: false });
+}
+
+function toggleRecording() {
+  if (isRecording) stopRecording();
+  else startRecording();
 }
 
 function startRecording() {
@@ -389,7 +420,7 @@ function startRecording() {
     return;
   }
 
-  liveText = '';
+  liveText    = '';
   isRecording = true;
 
   const ring = document.getElementById('recordRing');
@@ -397,19 +428,15 @@ function startRecording() {
   const lbl  = document.getElementById('recordLabel');
   ring.classList.add('recording');
   mic.textContent = '⏹';
-  lbl.textContent = 'Recording…';
-  document.getElementById('btnRecord').classList.add('pressing');
-  document.getElementById('voiceWrap') && document.getElementById('voiceWrap').classList.add('recording');
-  // dim the photo wrap
-  document.querySelector('.voice-wrap') && document.querySelector('.voice-wrap').classList.add('recording');
-
+  lbl.textContent = 'Tap to Stop';
+  document.querySelector('.voice-wrap')?.classList.add('recording');
   document.getElementById('voiceLiveText').classList.remove('hidden');
   document.getElementById('voiceTranscript').textContent = '';
 
   recognition = new SR();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = navigator.language || 'en-AU';
+  recognition.continuous      = true;
+  recognition.interimResults  = true;
+  recognition.lang            = navigator.language || 'en-AU';
 
   let finalText = '';
 
@@ -423,19 +450,19 @@ function startRecording() {
     document.getElementById('voiceTranscript').textContent = liveText;
   };
 
-  // iOS stops recognition after a pause — restart if still supposed to be recording
+  // iOS stops recognition after silence — restart automatically
   recognition.onend = () => {
     if (isRecording) {
-      try { recognition.start(); } catch { /* already started */ }
+      try { recognition.start(); } catch { /* already starting */ }
     }
   };
 
   recognition.onerror = e => {
-    if (e.error !== 'aborted') showToast(`Mic error: ${e.error}`);
-    if (isRecording) stopRecording();
+    if (e.error !== 'aborted' && e.error !== 'no-speech') showToast(`Mic error: ${e.error}`);
   };
 
-  try { recognition.start(); } catch (err) { showToast('Could not start recording: ' + err.message); isRecording = false; }
+  try { recognition.start(); }
+  catch (err) { showToast('Could not start mic: ' + err.message); isRecording = false; }
 }
 
 async function stopRecording() {
@@ -444,26 +471,23 @@ async function stopRecording() {
 
   if (recognition) { try { recognition.stop(); } catch { /* ok */ } recognition = null; }
 
-  // Restore button UI → processing state
   const ring = document.getElementById('recordRing');
   const mic  = document.getElementById('recordMic');
   const lbl  = document.getElementById('recordLabel');
   ring.classList.remove('recording');
-  document.getElementById('btnRecord').classList.remove('pressing');
-  document.querySelector('.voice-wrap') && document.querySelector('.voice-wrap').classList.remove('recording');
+  document.querySelector('.voice-wrap')?.classList.remove('recording');
 
   const transcript = liveText.trim();
   liveText = '';
 
   if (!transcript) {
-    mic.textContent = '🎤';
-    lbl.textContent = 'Hold to Record';
+    mic.textContent = '🎤'; lbl.textContent = 'Tap to Record';
     document.getElementById('voiceLiveText').classList.add('hidden');
     showToast('No speech detected — try again.');
     return;
   }
 
-  // Show processing spinner
+  // Processing state
   ring.classList.add('processing');
   mic.textContent = '';
   lbl.textContent = 'Processing…';
@@ -473,15 +497,13 @@ async function stopRecording() {
     const result = await api('POST', '/api/transcribe', { transcript });
     ring.classList.remove('processing');
     document.getElementById('btnRecord').disabled = false;
-    mic.textContent = '🎤';
-    lbl.textContent = 'Hold to Record';
+    mic.textContent = '🎤'; lbl.textContent = 'Tap to Record';
     document.getElementById('voiceLiveText').classList.add('hidden');
     showReviewSheet(result);
   } catch (err) {
     ring.classList.remove('processing');
     document.getElementById('btnRecord').disabled = false;
-    mic.textContent = '🎤';
-    lbl.textContent = 'Hold to Record';
+    mic.textContent = '🎤'; lbl.textContent = 'Tap to Record';
     document.getElementById('voiceLiveText').classList.add('hidden');
     showToast('Parse failed: ' + err.message);
   }
@@ -497,14 +519,13 @@ function showReviewSheet(result) {
 
   const note = document.getElementById('reviewAiNote');
   if (result.ai_parsed) {
-    note.className = 'review-ai-note ai-yes';
-    note.textContent = '✓ AI has split your narration into the three fields below — edit as needed.';
-  } else if (aiAvailable === false) {
-    note.className = 'review-ai-note ai-no';
-    note.textContent = '⚠ No ANTHROPIC_API_KEY set — full transcript placed in "What was inspected". Edit fields manually.';
+    note.className   = 'review-ai-note ai-yes';
+    note.textContent = '✓ AI has sorted your narration into the three fields below — edit if needed.';
   } else {
-    note.className = 'review-ai-note ai-no';
-    note.textContent = 'AI parsing unavailable — review and sort fields manually.';
+    note.className   = 'review-ai-note ai-no';
+    note.textContent = aiAvailable
+      ? 'AI parsing unavailable — review and sort the fields manually.'
+      : '⚠ No ANTHROPIC_API_KEY set — full transcript placed in first field.';
   }
 
   document.getElementById('reviewSheet').classList.remove('hidden');
@@ -522,23 +543,18 @@ async function confirmNotes(andNext) {
     issues_found:     document.getElementById('rvIssues').value,
     actions_required: document.getElementById('rvActions').value,
   };
-
   if (photos[currentIdx]) Object.assign(photos[currentIdx], body);
-
   try { await api('POST', `/api/notes/${sessionId}/${currentIdx}`, body); }
-  catch { showToast('Could not save notes to server.'); }
+  catch { showToast('Could not save to server.'); }
 
   dismissReview();
 
-  if (andNext && currentIdx < photos.length - 1) {
-    voiceNavigate(1);
-  } else if (andNext) {
-    showToast('Last photo reached — all notes saved.');
-  }
+  if (andNext && currentIdx < photos.length - 1) voiceNavigate(1);
+  else if (andNext) showToast('Last photo — all notes saved.');
 }
 
 // ---------------------------------------------------------------------------
-// Template file picker
+// Template + report
 // ---------------------------------------------------------------------------
 function onTemplateSelected(input) {
   const label = document.getElementById('templatePickLabel');
@@ -551,9 +567,6 @@ function onTemplateSelected(input) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Report
-// ---------------------------------------------------------------------------
 function updateReportSummary() {
   const box = document.getElementById('reportSummary');
   if (!photos.length) { box.innerHTML = '<p>No photos loaded yet.</p>'; return; }
@@ -586,7 +599,7 @@ async function generateReport() {
     const box = document.getElementById('reportResult');
     box.innerHTML = `
       <h3>✅ Report Ready</h3>
-      <p>Your report has been generated with all ${photos.length} photos, metadata and notes.</p>
+      <p>Generated with all ${photos.length} photos, metadata and inspection notes.</p>
       <a class="btn btn-primary dl-btn" href="${result.download_url}" download="${result.filename}">
         ⬇ Download Full Report (ZIP)
       </a><br><br>
@@ -620,7 +633,8 @@ async function api(method, url, body) {
 }
 
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 let toastTimer = null;
