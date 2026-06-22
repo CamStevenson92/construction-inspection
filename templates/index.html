@@ -210,17 +210,19 @@
         <div class="card">
           <h3 class="card-title">Word Template <span class="optional">(optional)</span></h3>
           <p class="card-desc">Upload a .docx template with <code>&lt;&lt;PLACEHOLDER&gt;&gt;</code> tokens. Photos are appended after template content.</p>
-          <label class="file-pick-label" id="templatePickLabel" for="templateInput">📄 Choose Template (.docx)</label>
-          <input type="file" id="templateInput" accept=".docx" style="display:none" onchange="onTemplateSelected(this)">
+          <label class="file-pick-label" id="templatePickLabel" for="templateInput">📄 Choose Template (.docx / .dotx)</label>
+          <input type="file" id="templateInput" accept=".docx,.dotx" style="display:none" onchange="onTemplateSelected(this)">
           <details class="placeholder-ref">
             <summary>View available placeholders</summary>
-            <pre>&lt;&lt;SITE_NAME&gt;&gt;        Site / project name
-&lt;&lt;PROJECT_NUMBER&gt;&gt;   Project reference
-&lt;&lt;INSPECTOR_NAME&gt;&gt;   Inspector full name
-&lt;&lt;SITE_ADDRESS&gt;&gt;     Street address
-&lt;&lt;INSPECTION_DATE&gt;&gt;  Date of earliest photo
-&lt;&lt;REPORT_DATE&gt;&gt;      Today's date
-&lt;&lt;TOTAL_PHOTOS&gt;&gt;     Number of photos</pre>
+            <pre>&lt;&lt;SITE_NAME&gt;&gt;            Site / project name
+&lt;&lt;PROJECT_NUMBER&gt;&gt;       Project reference
+&lt;&lt;INSPECTOR_NAME&gt;&gt;       Inspector full name
+&lt;&lt;SITE_ADDRESS&gt;&gt;         Street address
+&lt;&lt;INSPECTION_DATE&gt;&gt;      Date of earliest photo
+&lt;&lt;REPORT_DATE&gt;&gt;          Today's date
+&lt;&lt;TOTAL_PHOTOS&gt;&gt;         Number of photos
+&lt;&lt;INSPECTION_WEATHER&gt;&gt;   Auto-filled from photo GPS + weather API
+&lt;&lt;WORKS_SUMMARY&gt;&gt;        Auto-generated 100-word summary of inspected works</pre>
           </details>
         </div>
 

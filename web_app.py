@@ -355,7 +355,9 @@ def generate_report_route(session_id: str):
     report_dir.mkdir(parents=True, exist_ok=True)
 
     if template_file and template_file.filename:
-        template_path = str(report_dir / "template.docx")
+        # Preserve extension so .dotx is handled correctly by the generator
+        ext = os.path.splitext(template_file.filename)[1].lower() or ".docx"
+        template_path = str(report_dir / f"template{ext}")
         template_file.save(template_path)
 
     site_name = body.get("site_name", "")
